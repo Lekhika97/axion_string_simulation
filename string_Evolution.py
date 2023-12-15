@@ -288,6 +288,8 @@ def model(save_plot=True):
     import glob, os
     for name in glob.glob('tmp_*.png'):
         os.remove(name)
+    for name in glob.glob('ctmp_*.png'):
+        os.remove(name)
     if glob.glob('field_l.h5'):
         os.remove('field_l.h5')
     if glob.glob('field_r.h5'):
@@ -303,7 +305,7 @@ def model(save_plot=True):
         from random import randint
         freq = 2*np.pi*int(prefix)/Lx;
         freq_list = [2*np.pi*i/Lx for i in np.linspace(1e-3,prefix,1000)]
-        phi = 2*np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
+        phi = 4*np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
         for fr in freq_list[:-1]:
             phi += (randint(-400,400)/500)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10)
         return eta*np.sin(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq))))
@@ -392,6 +394,37 @@ def model(save_plot=True):
         
         time.sleep(0) # pause between frames
 
+        if save_plot:
+            filename = 'tmp_%04d.png' % n
+            # plt.savefig(filename)  # time consuming!
+       # ax1.collections.remove(u_surf)
+       # ax2.collections.remove(v_surf)
+        ax1.cla()
+        ax2.cla()
+        plt.close('all')
+        plt.draw()
+        time.sleep(1)
+
+        # contourplot of axion field
+        theta = np.arctan2(v,u)
+        fig = plt.figure(figsize=(12,9))
+        ax = plt.axes()
+        xvv, yvv = np.meshgrid(x,y)
+        theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='viridis')
+        plt.colorbar(theta_contour)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
+        fig.suptitle(title)
+
+        if save_plot:
+            filename = 'ctmp_%04d.png' % n
+            plt.savefig(filename)
+        ax.cla()
+        plt.close('all')
+        plt.draw()
+        time.sleep(1)
+
         # uncomment following lines to save array into gz file
         #filename = 'field_%04d.gz' % n
         #u_reshaped = u.reshape(u.shape[0], -1)
@@ -430,17 +463,6 @@ def model(save_plot=True):
         else:
             hdf5_write(v,filename)           
 
-
-        if save_plot:
-            filename = 'tmp_%04d.png' % n
-            plt.savefig(filename)  # time consuming!
-       # ax1.collections.remove(u_surf)
-       # ax2.collections.remove(v_surf)
-        ax1.cla()
-        ax2.cla()
-        plt.close('all')
-        plt.draw()
-        time.sleep(1)
 
     dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
                      user_action=plot_u)
