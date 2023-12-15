@@ -11,7 +11,7 @@ import glob
 def mem():
   print(f' Memory in use is {int(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)} mb \n') # gives mb of memory uses
 
-def solver(prefix, I, Vu, Vv, lam, rho3, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
+def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
            user_action=None):
     print(f'\nLattice size is {(Lx,Ly,Lz)} with {(Nx,Ny,Nz)} = {(Nx)*(Ny)*(Nz)} lattice points.')
     print(f'ti = {ti}, tf = {T}, dt = {dt}, Nt = {int(round((T-ti)/float(dt)))}\n')
@@ -95,7 +95,7 @@ def solver(prefix, I, Vu, Vv, lam, rho3, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, N
    
     V_u = Vu(xv, yv, zv)
     V_v = Vv(xv, yv, zv)
-    u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, rho3, n, eta, epsilon, Bx, By, Bz, ti, dt2, V_u=V_u, V_v=V_v, step1=True)
+    u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2, V_u=V_u, V_v=V_v, step1=True)
     vev = [(u.mean(),v.mean())]
     print(f'n = {n}, Av l = {round(u.mean(),5)}, Av r = {round(v.mean(),5)}')
 
@@ -111,7 +111,7 @@ def solver(prefix, I, Vu, Vv, lam, rho3, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, N
     for n in It[1:-1]:
         iter_t0 = time.process_time() # check iteration time
         
-        u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, rho3, n, eta, epsilon, Bx, By, Bz, ti, dt2)
+        u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2)
         vev.append((u.mean(),v.mean()))
         print(f'n = {n}, Av l = {round(u.mean(),5)}, Av r = {round(v.mean(),5)}')
 
@@ -144,11 +144,13 @@ def solver(prefix, I, Vu, Vv, lam, rho3, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, N
     return dt, t1 - t0
 
 
-def advance(u, u_1, u_2, v, v_1, v_2, lam, rho3, n, eta, epsilon, Bx, By, Bz, ti, dt2,
+def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2,
                        V_u=None, V_v=None, step1=False):
     dt = np.sqrt(dt2)  # save
     Bx = Bx/(n*dt+ti); By = By/(n*dt+ti); Bz = Bz/(n*dt+ti)
     A = dt/(2*(ti+n*dt))
+    NDW = 2 # move it to model
+    m=1 # move it to model
 
     u_xx = u_1[:-2,1:-1,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[2:,1:-1,1:-1]
     u_yy = u_1[1:-1,:-2,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[1:-1,2:,1:-1]
@@ -159,24 +161,28 @@ def advance(u, u_1, u_2, v, v_1, v_2, lam, rho3, n, eta, epsilon, Bx, By, Bz, ti
     v_zz = v_1[1:-1,1:-1,:-2] - 2*v_1[1:-1,1:-1,1:-1] + v_1[1:-1,1:-1,2:]
     
     if step1:
-        u[1:-1,1:-1,1:-1] = (1 - ((lam*dt2)/2)*(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] - \
-                       eta**2))*u_1[1:-1,1:-1,1:-1] - (rho3/2)*(dt2/2)*(u_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1]) - \
-                       ((3/2)*A-1)*dt*V_u[1:-1,1:-1,1:-1] + \
+        u[1:-1,1:-1,1:-1] = (1 - ((lam*dt2)/2)*(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] - \
+                       eta**2))*u_1[1:-1,1:-1,1:-1] - (dt2/2)*m**2*(u_1[1:-1,1:-1,1:-1]*np.cos(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1]))+ \
+                        NDW*v_1[1:-1,1:-1,1:-1]*np.sin(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1])))/ (NDW**2*np.sqrt(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + \
+                        v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1])) - ((3/2)*A-1)*dt*V_u[1:-1,1:-1,1:-1] + \
                        Bx*u_xx/2 + By*u_yy/2 + Bz*u_zz/2
                        
-        v[1:-1,1:-1,1:-1] = (1 - ((lam*dt2)/2)*(v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] - \
-                       eta**2))*v_1[1:-1,1:-1,1:-1] - (rho3/2)*(dt2/2)*(v_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1]) - \
-                       ((3/2)*A-1)*dt*V_v[1:-1,1:-1,1:-1] + \
+        v[1:-1,1:-1,1:-1] = (1 - ((lam*dt2)/2)*(v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] + u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] - \
+                       eta**2))*v_1[1:-1,1:-1,1:-1] - (dt2/2)*m**2*(v_1[1:-1,1:-1,1:-1]*np.cos(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1]))- \
+                        NDW*u_1[1:-1,1:-1,1:-1]*np.sin(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1])))/ (NDW**2*np.sqrt(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + \
+                        v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1])) - ((3/2)*A-1)*dt*V_v[1:-1,1:-1,1:-1] + \
                        Bx*v_xx/2 + By*v_yy/2 + Bz*v_zz/2
     else:
-        u[1:-1,1:-1,1:-1] = ((2 - lam*dt2*(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] - \
-                       eta**2))*u_1[1:-1,1:-1,1:-1] - (rho3/2)*dt2*(u_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1]) + \
-                       ((3/2)*A-1)*u_2[1:-1,1:-1,1:-1] + \
+        u[1:-1,1:-1,1:-1] = ((2 - lam*dt2*(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] - \
+                       eta**2))*u_1[1:-1,1:-1,1:-1] - dt2*m**2*(u_1[1:-1,1:-1,1:-1]*np.cos(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1]))+ \
+                        NDW*v_1[1:-1,1:-1,1:-1]*np.sin(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1])))/ (NDW**2*np.sqrt(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + \
+                        v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1])) + ((3/2)*A-1)*u_2[1:-1,1:-1,1:-1] + \
                        Bx*u_xx + By*u_yy + Bz*u_zz)/(1+(3/2)*A)
         
-        v[1:-1,1:-1,1:-1] = ((2 - lam*dt2*(v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] - \
-                       eta**2))*v_1[1:-1,1:-1,1:-1] - (rho3/2)*dt2*(v_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1]) + \
-                       ((3/2)*A-1)*v_2[1:-1,1:-1,1:-1] + \
+        v[1:-1,1:-1,1:-1] = ((2 - lam*dt2*(v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1] + u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] - \
+                       eta**2))*v_1[1:-1,1:-1,1:-1] - dt2*m**2*(v_1[1:-1,1:-1,1:-1]*np.cos(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1]))- \
+                        NDW*u_1[1:-1,1:-1,1:-1]*np.sin(NDW*np.arctan2(v_1[1:-1,1:-1,1:-1],u_1[1:-1,1:-1,1:-1])))/ (NDW**2*np.sqrt(u_1[1:-1,1:-1,1:-1]*u_1[1:-1,1:-1,1:-1] + \
+                        v_1[1:-1,1:-1,1:-1]*v_1[1:-1,1:-1,1:-1])) + ((3/2)*A-1)*v_2[1:-1,1:-1,1:-1] + \
                        Bx*v_xx + By*v_yy + Bz*v_zz)/(1+(3/2)*A)
 
     # Boundary condition u=0
@@ -275,7 +281,7 @@ def model(save_plot=True):
     # Grid and model parameters
     prefix, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, epsilon, T, _ = param()
 
-    lam = 0.1; rho3 = 1.7; eta = 1; a0 = 1; m=eta*np.sqrt((rho3-(2*lam))/2)
+    lam = 0.1; eta = 1; a0 = 1; m = 1
     Bx = 1; By = 1; Bz = 1
     
     # Clean up plot files
@@ -297,10 +303,10 @@ def model(save_plot=True):
         from random import randint
         freq = 2*np.pi*int(prefix)/Lx;
         freq_list = [2*np.pi*i/Lx for i in np.linspace(1e-3,prefix,1000)]
-        phi = np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
+        phi = 2*np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
         for fr in freq_list[:-1]:
             phi += (randint(-400,400)/500)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10)
-        return eta*np.sin(np.arctan(np.exp(m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(m*phi/(abs(phi).max()*freq))))
+        return eta*np.sin(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq))))
         
 
         # correlation sized domains with 5 high frequency modes added
@@ -436,7 +442,7 @@ def model(save_plot=True):
         plt.draw()
         time.sleep(1)
 
-    dt, cpu = solver(prefix, I, Vu, Vv, lam, rho3, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
+    dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
                      user_action=plot_u)
     print(f'Total time taken is {cpu/3600} hr')
     
