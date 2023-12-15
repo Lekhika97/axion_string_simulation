@@ -149,8 +149,8 @@ def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2,
     dt = np.sqrt(dt2)  # save
     Bx = Bx/(n*dt+ti); By = By/(n*dt+ti); Bz = Bz/(n*dt+ti)
     A = dt/(2*(ti+n*dt))
-    NDW = 2 # move it to model
-    m=1 # move it to model
+    NDW = 3 # move it to model
+    m = 1 # move it to model
 
     u_xx = u_1[:-2,1:-1,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[2:,1:-1,1:-1]
     u_yy = u_1[1:-1,:-2,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[1:-1,2:,1:-1]
@@ -300,15 +300,20 @@ def model(save_plot=True):
 
     def I(x, y, z):
         """Initial field configuration of u."""
+
+        # random phases between 0 and 2pi
+        phi = 2*np.pi*np.random.rand(x.shape[0],y.shape[1],z.shape[2])
+        return eta*np.sin(phi), eta*np.cos(phi)
         
         # random sized domains of correlation size, small randomness
-        from random import randint
-        freq = 2*np.pi*int(prefix)/Lx;
-        freq_list = [2*np.pi*i/Lx for i in np.linspace(1e-3,prefix,1000)]
-        phi = 4*np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
-        for fr in freq_list[:-1]:
-            phi += (randint(-400,400)/500)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10)
-        return eta*np.sin(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq))))
+        # from random import randint
+        # freq = 2*np.pi*int(prefix)/Lx;
+        # freq_list = [2*np.pi*i/Lx for i in np.linspace(1e-3,prefix,1000)]
+        # phi = np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
+        # for fr in freq_list[:-1]:
+        #     phi += (randint(-400,400)/500)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10)
+        # print(phi.min(),phi.max())
+        # return eta*np.sin(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(10*m*phi/(abs(phi).max()*freq))))
         
 
         # correlation sized domains with 5 high frequency modes added
@@ -379,7 +384,7 @@ def model(save_plot=True):
         ax1.set_xlabel('x')
         ax1.set_ylabel('y')
         ax1.set_zlabel(f'$l(x,y,{round(Nz/2*(zv[0,0,1]-zv[0,0,0]),1)})$')
-        ax1.set_zlim(-0.5, 1.5)
+        ax1.set_zlim(-1.25, 1.25)
             
         ax2 = fig.add_subplot(1,2,2,projection='3d')
         v_surf = ax2.plot_surface(xv[:,:,0], yv[:,:,0], v[:,:,int(Nz/2)],cmap='viridis', edgecolor='none')
@@ -389,14 +394,14 @@ def model(save_plot=True):
         ax2.set_xlabel('x')
         ax2.set_ylabel('y')
         ax2.set_zlabel(f'$r(x,y,{round(Nz/2*(zv[0,0,1]-zv[0,0,0]),1)})$')
-        ax2.set_zlim(-0.5, 1.5)
+        ax2.set_zlim(-1.25, 1.25)
             
         
         time.sleep(0) # pause between frames
 
         if save_plot:
             filename = 'tmp_%04d.png' % n
-            # plt.savefig(filename)  # time consuming!
+            plt.savefig(filename)  # time consuming!
        # ax1.collections.remove(u_surf)
        # ax2.collections.remove(v_surf)
         ax1.cla()
@@ -407,11 +412,18 @@ def model(save_plot=True):
 
         # contourplot of axion field
         theta = np.arctan2(v,u)
-        fig = plt.figure(figsize=(12,9))
+        fig = plt.figure(figsize=(12,15))
         ax = plt.axes()
         xvv, yvv = np.meshgrid(x,y)
-        theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='viridis')
-        plt.colorbar(theta_contour)
+        theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='hsv')
+
+        # plot continuous colorbar
+        from matplotlib.colors import Normalize
+        norm = Normalize(vmin=theta_contour.cvalues.min(), vmax=theta_contour.cvalues.max())
+        sm = plt.cm.ScalarMappable(norm=norm, cmap = theta_contour.cmap)
+        sm.set_array([])
+        plt.colorbar(sm, ticks=theta_contour.levels, orientation="horizontal")
+
         ax.set_xlabel("x")
         ax.set_ylabel("y")
         title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
@@ -447,21 +459,21 @@ def model(save_plot=True):
             f.close()
 
 
-        filename = 'field_l.h5'
-        if glob.glob(filename):
-            f = h5py.File(filename, "a")
-            f[f'field_{n}'] = u
-            f.close()
-        else:
-            hdf5_write(u,filename) 
+        # filename = 'field_l.h5'
+        # if glob.glob(filename):
+        #     f = h5py.File(filename, "a")
+        #     f[f'field_{n}'] = u
+        #     f.close()
+        # else:
+        #     hdf5_write(u,filename) 
             
-        filename = 'field_r.h5'
-        if glob.glob(filename):
-            f = h5py.File(filename, "a")
-            f[f'field_{n}'] = v
-            f.close()
-        else:
-            hdf5_write(v,filename)           
+        # filename = 'field_r.h5'
+        # if glob.glob(filename):
+        #     f = h5py.File(filename, "a")
+        #     f[f'field_{n}'] = v
+        #     f.close()
+        # else:
+        #     hdf5_write(v,filename)           
 
 
     dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
