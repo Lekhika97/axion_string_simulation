@@ -149,8 +149,8 @@ def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2,
     dt = np.sqrt(dt2)  # save
     Bx = Bx/(n*dt+ti); By = By/(n*dt+ti); Bz = Bz/(n*dt+ti)
     A = dt/(2*(ti+n*dt))
-    NDW = 3 # move it to model
-    m = 1 # move it to model
+    NDW = 1 # move it to model
+    m = 5e-5 # move it to model
 
     u_xx = u_1[:-2,1:-1,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[2:,1:-1,1:-1]
     u_yy = u_1[1:-1,:-2,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[1:-1,2:,1:-1]
@@ -281,7 +281,7 @@ def model(save_plot=True):
     # Grid and model parameters
     prefix, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, epsilon, T, _ = param()
 
-    lam = 0.1; eta = 1; a0 = 1; m = 1
+    lam = 0.1; eta = 1; a0 = 1; m = 5e-1
     Bx = 1; By = 1; Bz = 1
     
     # Clean up plot files
@@ -302,7 +302,18 @@ def model(save_plot=True):
         """Initial field configuration of u."""
 
         # random phases between 0 and 2pi
-        phi = 2*np.pi*np.random.rand(x.shape[0],y.shape[1],z.shape[2])
+        #phi = 2*np.pi*np.random.rand(x.shape[0],y.shape[1],z.shape[2])
+        #return eta*np.sin(phi), eta*np.cos(phi)
+        
+        # random phases between 0 and 2pi with a correlation length
+        from random import randint
+        freq = 2*np.pi*int(prefix)/Lx;
+        freq_list = [2*np.pi*i/Lx for i in np.linspace(1e-3,prefix,80)]
+        phi = np.pi*np.sin(freq*x+np.pi/2*randint(-10,10)/10)*np.sin(freq*y+np.pi/2*randint(-10,10)/10)*np.sin(freq*z+np.pi/2*randint(-10,10)/10)
+        for fr in freq_list[:-1]:
+            phi += np.pi*(randint(-4,4)/5)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10)
+        phi = -np.pi + phi % 2*np.pi
+        print(phi.min(),phi.max())        
         return eta*np.sin(phi), eta*np.cos(phi)
         
         # random sized domains of correlation size, small randomness
@@ -401,7 +412,7 @@ def model(save_plot=True):
 
         if save_plot:
             filename = 'tmp_%04d.png' % n
-            plt.savefig(filename)  # time consuming!
+            #plt.savefig(filename)  # time consuming!
        # ax1.collections.remove(u_surf)
        # ax2.collections.remove(v_surf)
         ax1.cla()
@@ -415,14 +426,18 @@ def model(save_plot=True):
         fig = plt.figure(figsize=(12,15))
         ax = plt.axes()
         xvv, yvv = np.meshgrid(x,y)
-        theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='hsv')
+        #theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='hsv')
+        
+        sm = ax.imshow(theta[:,:,int(Nz/2)], cmap="twilight", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
+        
+        plt.colorbar(sm, orientation="horizontal")
 
         # plot continuous colorbar
-        from matplotlib.colors import Normalize
-        norm = Normalize(vmin=theta_contour.cvalues.min(), vmax=theta_contour.cvalues.max())
-        sm = plt.cm.ScalarMappable(norm=norm, cmap = theta_contour.cmap)
-        sm.set_array([])
-        plt.colorbar(sm, ticks=theta_contour.levels, orientation="horizontal")
+        #from matplotlib.colors import Normalize
+        #norm = Normalize(vmin=theta_contour.cvalues.min(), vmax=theta_contour.cvalues.max())
+        #sm = plt.cm.ScalarMappable(norm=norm, cmap = theta_contour.cmap)
+        #sm.set_array([])
+        #plt.colorbar(sm, ax = ax, ticks=theta_contour.levels, orientation="horizontal")
 
         ax.set_xlabel("x")
         ax.set_ylabel("y")
@@ -476,14 +491,14 @@ def model(save_plot=True):
         #     hdf5_write(v,filename)           
 
 
-    dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
-                     user_action=plot_u)
+    dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T, user_action=plot_u)
     print(f'Total time taken is {cpu/3600} hr')
     
     # Make video files
     fps = 29  # frames per second
     codec2ext = dict(libx264='mp4')
-    filespec = 'tmp_%04d.png'
+    #filespec = 'tmp_%04d.png'
+    filespec = 'ctmp_%04d.png'
     movie_program = 'ffmpeg'  # or 'avconv'
     for codec in codec2ext:
         ext = codec2ext[codec]
@@ -492,6 +507,10 @@ def model(save_plot=True):
         
     for name in glob.glob('tmp_*.png'):
         os.remove(name)
+    for name in glob.glob('ctmp_*.png'):
+        os.remove(name)
+    
+   
 
 
 if __name__ == '__main__':
