@@ -7,11 +7,12 @@ import numpy as np
 import os, psutil # for checking memory uses
 import h5py
 import glob
+import gc
 
 def mem():
   print(f' Memory in use is {int(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)} mb \n') # gives mb of memory uses
 
-def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
+def solver(prefix, I, Vu, Vv, lam, eta, a0, NDW, m, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
            user_action=None):
     print(f'\nLattice size is {(Lx,Ly,Lz)} with {(Nx,Ny,Nz)} = {(Nx)*(Ny)*(Nz)} lattice points.')
     print(f'ti = {ti}, tf = {T}, dt = {dt}, Nt = {int(round((T-ti)/float(dt)))}\n')
@@ -87,7 +88,7 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt,
     u_2[:,:,:], v_2[:,:,:] = I(xv, yv, zv)
 
     if user_action is not None:
-        user_action(u_1, v_1, x, xv, y, yv, z, zv, t, 0)
+        user_action(u_1, u_2, v_1, v_2, x, xv, y, yv, z, zv, t, 0)
 
     # Special formula for first time step
     n = 0
@@ -95,12 +96,12 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt,
    
     V_u = Vu(xv, yv, zv)
     V_v = Vv(xv, yv, zv)
-    u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2, V_u=V_u, V_v=V_v, step1=True)
+    u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, NDW, m, Bx, By, Bz, ti, dt2, V_u=V_u, V_v=V_v, step1=True)
     vev = [(u.mean(),v.mean())]
     print(f'n = {n}, Av l = {round(u.mean(),5)}, Av r = {round(v.mean(),5)}')
 
     if user_action is not None:
-        user_action(u, v, x, xv, y, yv, z, zv, t, 1)
+        user_action(u, u_1, v, v_1, x, xv, y, yv, z, zv, t, 1)
 
     # Update data structures for next step
     #u_2[:] = u_1;  u_1[:] = u  # safe, but slower
@@ -111,13 +112,13 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt,
     for n in It[1:-1]:
         iter_t0 = time.process_time() # check iteration time
         
-        u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2)
+        u, v = advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, NDW, m, Bx, By, Bz, ti, dt2)
         vev.append((u.mean(),v.mean()))
         print(f'n = {n}, Av l = {round(u.mean(),5)}, Av r = {round(v.mean(),5)}')
 
 
         if user_action is not None:
-            if user_action(u, v, x, xv, y, yv, z, zv, t, n+1):
+            if user_action(u, u_1, v, v_1, x, xv, y, yv, z, zv, t, n+1):
                 break
 
         # Update data structures for next step
@@ -132,11 +133,11 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt,
           print(f'n = {n} iteration done.')
     
     # save vev as txt file
-    filename = f'{prefix}_vev_{round(epsilon,3)}.csv'
-    if glob.glob(filename):
-        os.remove(filename)
-    np.savetxt(filename, vev)
-    print('vev exported :)')
+    # filename = f'{prefix}_vev_{round(epsilon,3)}.csv'
+    # if glob.glob(filename):
+    #     os.remove(filename)
+    # np.savetxt(filename, vev)
+    # print('vev exported :)')
     
     # Important to set u = u_1 if u is to be returned!
     t1 = time.process_time()
@@ -144,13 +145,11 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt,
     return dt, t1 - t0
 
 
-def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, epsilon, Bx, By, Bz, ti, dt2,
+def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, NDW, m, Bx, By, Bz, ti, dt2,
                        V_u=None, V_v=None, step1=False):
     dt = np.sqrt(dt2)  # save
     Bx = Bx/(n*dt+ti); By = By/(n*dt+ti); Bz = Bz/(n*dt+ti)
     A = dt/(2*(ti+n*dt))
-    NDW = 1 # move it to model
-    m = 5e-5 # move it to model
 
     u_xx = u_1[:-2,1:-1,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[2:,1:-1,1:-1]
     u_yy = u_1[1:-1,:-2,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[1:-1,2:,1:-1]
@@ -281,7 +280,7 @@ def model(save_plot=True):
     # Grid and model parameters
     prefix, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, epsilon, T, _ = param()
 
-    lam = 0.1; eta = 1; a0 = 1; m = 5e-1
+    lam = 0.1; eta = 1; a0 = 1; m = 5e-1; NDW = 3
     Bx = 1; By = 1; Bz = 1
     
     # Clean up plot files
@@ -290,11 +289,16 @@ def model(save_plot=True):
         os.remove(name)
     for name in glob.glob('ctmp_*.png'):
         os.remove(name)
+    for name in glob.glob('rho_tmp_*.png'):
+        os.remove(name)
     if glob.glob('field_l.h5'):
         os.remove('field_l.h5')
     if glob.glob('field_r.h5'):
         os.remove('field_r.h5')
-    name = f'{prefix}_movie_{round(epsilon,3)}.mp4'
+    name = f'{prefix}_movie_axion.mp4'
+    if glob.glob(name):
+        os.remove(name)
+    name = f'{prefix}_movie_density.mp4'
     if glob.glob(name):
         os.remove(name)
 
@@ -381,7 +385,7 @@ def model(save_plot=True):
         return 1e-15*np.tanh(phi/abs(phi).max()) # closer to zero faster the velocity
 
 
-    def plot_u(u, v, x, xv, y, yv, z, zv, t, n):
+    def plot_u(u, u_1, v, v_1, x, xv, y, yv, z, zv, t, n):
             
         from mpl_toolkits import mplot3d
         import matplotlib.pyplot as plt
@@ -452,6 +456,65 @@ def model(save_plot=True):
         plt.draw()
         time.sleep(1)
 
+        # contourplot of energy density
+
+        # total potential
+        Vtot = lam/4*((u**2+v**2-eta**2)**2) + m**2*eta**2/NDW**2*(1-np.cos(NDW*theta))
+        print(Vtot.min())
+        Vtot -= Vtot.min()
+        
+        # Gradient of the two fields
+        dudx = (u[1:,:,:]-u[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
+        dudy = (u[:,1:,:]-u[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
+        dudz = (u[:,:,1:]-u[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
+        dvdx = (v[1:,:,:]-v[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
+        dvdy = (v[:,1:,:]-v[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
+        dvdz = (v[:,:,1:]-v[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
+
+        dudt = (u-u_1)/dt
+        dvdt = (v-v_1)/dt
+
+        # Grad square with reduced size
+        dudx = dudx[:,:-1,:-1]*dudx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        dudy = dudy[:-1,:,:-1]*dudy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        dudz = dudz[:-1,:-1,:]*dudz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
+
+        dvdx = dvdx[:,:-1,:-1]*dvdx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        dvdy = dvdy[:-1,:,:-1]*dvdy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        dvdz = dvdz[:-1,:-1,:]*dvdz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
+
+        dudt = dudt[:-1,:-1,:-1]*dudt[:-1,:-1,:-1]
+        dvdt = dvdt[:-1,:-1,:-1]*dvdt[:-1,:-1,:-1]
+
+        # add up
+        gradSq = dudx+dudy+dudz+dvdx+dvdy+dvdz # shape (Nx-1,Ny-1,Nz-1)
+        dotSq = dudt+dvdt
+        del dudx, dudy, dudz, dvdx, dvdy, dvdz, dudt, dvdt
+        gc.collect()
+
+        # calculate energy density
+        energyDensity = 0.5*(dotSq + gradSq) + Vtot[:-1,:-1,:-1]
+        fig = plt.figure(figsize=(12,15))
+        ax = plt.axes()
+        xvv, yvv = np.meshgrid(x,y)
+        
+        sm = ax.imshow(energyDensity[:,:,int(Nz/2)], cmap="gray", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
+        
+        plt.colorbar(sm, orientation="horizontal")
+
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
+        fig.suptitle(title)
+
+        if save_plot:
+            filename = 'rho_tmp_%04d.png' % n
+            plt.savefig(filename)
+        ax.cla()
+        plt.close('all')
+        plt.draw()
+        time.sleep(1)
+
         # uncomment following lines to save array into gz file
         #filename = 'field_%04d.gz' % n
         #u_reshaped = u.reshape(u.shape[0], -1)
@@ -491,23 +554,31 @@ def model(save_plot=True):
         #     hdf5_write(v,filename)           
 
 
-    dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, epsilon, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T, user_action=plot_u)
+    dt, cpu = solver(prefix, I, Vu, Vv, lam, eta, a0, NDW, m, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T, user_action=plot_u)
     print(f'Total time taken is {cpu/3600} hr')
     
     # Make video files
     fps = 29  # frames per second
     codec2ext = dict(libx264='mp4')
     #filespec = 'tmp_%04d.png'
-    filespec = 'ctmp_%04d.png'
+    filespec_axion = 'ctmp_%04d.png'
+    filespec_energy_density = 'rho_tmp_%04d.png'
     movie_program = 'ffmpeg'  # or 'avconv'
     for codec in codec2ext:
         ext = codec2ext[codec]
-        cmd = f'{movie_program} -r {fps} -i {filespec} -vcodec {codec} {prefix}_movie_{round(epsilon,3)}.{ext}'
+        cmd = f'{movie_program} -r {fps} -i {filespec_axion} -vcodec {codec} {prefix}_movie_axion.{ext}'
+        os.system(cmd)
+    
+    for codec in codec2ext:
+        ext = codec2ext[codec]
+        cmd = f'{movie_program} -r {fps} -i {filespec_energy_density} -vcodec {codec} {prefix}_movie_density.{ext}'
         os.system(cmd)
         
     for name in glob.glob('tmp_*.png'):
         os.remove(name)
     for name in glob.glob('ctmp_*.png'):
+        os.remove(name)
+    for name in glob.glob('rho_tmp_*.png'):
         os.remove(name)
     
    
