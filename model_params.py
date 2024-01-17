@@ -1,10 +1,10 @@
 import numpy as np
 
 def param():
-    Nx = 256;Ny = 256;Nz = 256;dt = 1e-1;ti = 1 ; epsilon = 0.0
+    Nx = 256;Ny = 256;Nz = 128;dt = 1e-1;ti = 1 ; epsilon = 0.0
     Lx = 50; Ly = 50; Lz = 50;
     prefix = 4 #number of domain pairs (consecutive true and false) within the length of the box
-    T = 151
+    T = 251
     Nt = int(round((T-ti)/float(dt)))
     return prefix, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, epsilon, T, Nt
 

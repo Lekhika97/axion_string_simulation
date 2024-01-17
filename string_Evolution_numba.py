@@ -8,10 +8,12 @@ import os, psutil # for checking memory uses
 import h5py
 import glob
 import gc
+import numba
 
 def mem():
   print(f' Memory in use is {int(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2)} mb \n') # gives mb of memory uses
 
+# @numba.jit(parallel=True)
 def solver(prefix, I, Vu, Vv, lam, eta, a0, NDW, m, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, T,
            user_action=None):
     print(f'\nLattice size is {(Lx,Ly,Lz)} with {(Nx,Ny,Nz)} = {(Nx)*(Ny)*(Nz)} lattice points.')
@@ -144,12 +146,18 @@ def solver(prefix, I, Vu, Vv, lam, eta, a0, NDW, m, Lx, Ly, Lz, Nx, Ny, Nz, dt, 
     # dt might be computed in this function so return the value
     return dt, t1 - t0
 
-
+@numba.jit(parallel=True)
 def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, NDW, m, Bx, By, Bz, ti, dt2,
                        V_u=None, V_v=None, step1=False):
     dt = np.sqrt(dt2)  # save
     Bx = Bx/(n*dt+ti); By = By/(n*dt+ti); Bz = Bz/(n*dt+ti)
     A = dt/(2*(ti+n*dt))
+
+    # temperature dependent axion mass
+    m_final = m
+    m = 5e-5
+    if n > 600:
+        m = m_final
 
     u_xx = u_1[:-2,1:-1,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[2:,1:-1,1:-1]
     u_yy = u_1[1:-1,:-2,1:-1] - 2*u_1[1:-1,1:-1,1:-1] + u_1[1:-1,2:,1:-1]
@@ -271,7 +279,7 @@ def advance(u, u_1, u_2, v, v_1, v_2, lam, n, eta, NDW, m, Bx, By, Bz, ti, dt2,
     return u, v
 
 
-
+# @numba.jit(parallel=True)
 def model(save_plot=True):
     """
     Defines initial field config, model parameters, grid parameters and calls solver function.
@@ -280,11 +288,13 @@ def model(save_plot=True):
     # Grid and model parameters
     prefix, Lx, Ly, Lz, Nx, Ny, Nz, dt, ti, epsilon, T, _ = param()
 
-    lam = 0.1; eta = 1; a0 = 1; m = 5e-5; NDW = 3
+    lam = 0.1; eta = 1; a0 = 1; NDW = 3
     Bx = 1; By = 1; Bz = 1
+
+    # initial axion mass
+    m = 5e-1
     
     # Clean up plot files
-    import glob, os
     for name in glob.glob('tmp_*.png'):
         os.remove(name)
     for name in glob.glob('ctmp_*.png'):
@@ -307,6 +317,7 @@ def model(save_plot=True):
     if glob.glob(name):
         os.remove(name)
 
+    # @numba.jit(parallel=True)
     def I(x, y, z):
         """Initial field configuration of u."""
 
@@ -356,7 +367,7 @@ def model(save_plot=True):
         # return eta*np.sin(np.arctan(np.exp(m*phi/(abs(phi).max()*freq)))), eta*np.cos(np.arctan(np.exp(m*phi/(abs(phi).max()*freq))))
         
     
-    
+    # @numba.jit(parallel=True)
     def Vu(x, y, z):
         # return (y-x-z)*0
         
@@ -372,7 +383,8 @@ def model(save_plot=True):
         for fr in freq_list[:-1]:
             phi += (randint(-100,100)/1200)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10) + 1e-10
         return 1e-15*np.tanh(phi/abs(phi).max()) # closer to zero faster the velocity
-        
+
+    # @numba.jit(parallel=True)    
     def Vv(x, y, z):
         # return (y-x-z)*0
         
@@ -389,14 +401,13 @@ def model(save_plot=True):
             phi += (randint(-100,100)/1200)*np.sin(fr*x+np.pi/2*randint(-10,10)/10)*np.sin(fr*y+np.pi/2*randint(-10,10)/10)*np.sin(fr*z+np.pi/2*randint(-10,10)/10) + 1e-10
         return 1e-15*np.tanh(phi/abs(phi).max()) # closer to zero faster the velocity
 
-
+    # @numba.jit(parallel=True)
     def plot_u(u, u_1, v, v_1, x, xv, y, yv, z, zv, t, n):
             
         from mpl_toolkits import mplot3d
         import matplotlib.pyplot as plt
 
         fig = plt.figure(figsize=(12,6))
-        #ax = plt.axes(projection='3d')
         ax1 = fig.add_subplot(1,2,1,projection='3d')
 
         u_surf = ax1.plot_surface(xv[:,:,0], yv[:,:,0], u[:,:,int(Nz/2)],cmap='viridis', edgecolor='none')
@@ -421,7 +432,7 @@ def model(save_plot=True):
 
         if save_plot:
             filename = 'tmp_%04d.png' % n
-            #plt.savefig(filename)  # time consuming!
+            # plt.savefig(filename)  # time consuming!
        # ax1.collections.remove(u_surf)
        # ax2.collections.remove(v_surf)
         ax1.cla()
@@ -431,113 +442,106 @@ def model(save_plot=True):
         time.sleep(1)
 
         # contourplot of axion field
-        theta = np.arctan2(v,u)
-        fig = plt.figure(figsize=(12,15))
-        ax = plt.axes()
-        xvv, yvv = np.meshgrid(x,y)
-        #theta_contour = ax.contourf(xvv, yvv, theta[:,:,int(Nz/2)],cmap='hsv')
+        # theta = np.arctan2(v,u)
+        # fig = plt.figure(figsize=(12,15))
+        # ax = plt.axes()
+        # xvv, yvv = np.meshgrid(x,y)
         
-        sm = ax.imshow(theta[:,:,int(Nz/2)], cmap="twilight", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
+        # sm = ax.imshow(theta[:,:,int(Nz/2)], cmap="twilight", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
         
-        plt.colorbar(sm, orientation="horizontal")
+        # plt.colorbar(sm, orientation="horizontal")
 
-        # plot continuous colorbar
-        #from matplotlib.colors import Normalize
-        #norm = Normalize(vmin=theta_contour.cvalues.min(), vmax=theta_contour.cvalues.max())
-        #sm = plt.cm.ScalarMappable(norm=norm, cmap = theta_contour.cmap)
-        #sm.set_array([])
-        #plt.colorbar(sm, ax = ax, ticks=theta_contour.levels, orientation="horizontal")
+        # ax.set_xlabel("x")
+        # ax.set_ylabel("y")
+        # title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
+        # fig.suptitle(title)
 
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
-        fig.suptitle(title)
-
-        if save_plot:
-            filename = 'ctmp_%04d.png' % n
-            plt.savefig(filename)
-        ax.cla()
-        plt.close('all')
-        plt.draw()
-        time.sleep(1)
+        # if save_plot:
+        #     filename = 'ctmp_%04d.png' % n
+        #     plt.savefig(filename)
+        # ax.cla()
+        # plt.close('all')
+        # plt.draw()
+        # time.sleep(1)
 
         # contourplot of energy density
 
         # total potential
-        Vtot = lam/4*((u**2+v**2-eta**2)**2) + m**2*eta**2/NDW**2*(1-np.cos(NDW*theta))
-        print(Vtot.min())
-        Vtot -= Vtot.min()
+        # Vtot = lam/4*((u**2+v**2-eta**2)**2) + m**2*eta**2/NDW**2*(1-np.cos(NDW*theta))
+        # print(Vtot.min())
+        # Vtot -= Vtot.min()
         
-        # Gradient of the two fields
-        dudx = (u[1:,:,:]-u[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
-        dudy = (u[:,1:,:]-u[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
-        dudz = (u[:,:,1:]-u[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
-        dvdx = (v[1:,:,:]-v[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
-        dvdy = (v[:,1:,:]-v[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
-        dvdz = (v[:,:,1:]-v[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
+        # # Gradient of the two fields
+        # dudx = (u[1:,:,:]-u[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
+        # dudy = (u[:,1:,:]-u[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
+        # dudz = (u[:,:,1:]-u[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
+        # dvdx = (v[1:,:,:]-v[:-1,:,:])/(x[1]-x[0]) # shape (Nx-1,Ny,Nz)
+        # dvdy = (v[:,1:,:]-v[:,:-1,:])/(y[1]-y[0]) # shape (Nx,Ny-1,Nz)
+        # dvdz = (v[:,:,1:]-v[:,:,:-1])/(z[1]-z[0]) # shape (Nx,Ny,Nz-1)
 
-        dudt = (u-u_1)/dt
-        dvdt = (v-v_1)/dt
+        # dudt = (u-u_1)/dt
+        # dvdt = (v-v_1)/dt
 
-        # Grad square with reduced size
-        dudx = dudx[:,:-1,:-1]*dudx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
-        dudy = dudy[:-1,:,:-1]*dudy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
-        dudz = dudz[:-1,:-1,:]*dudz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
+        # # Grad square with reduced size
+        # dudx = dudx[:,:-1,:-1]*dudx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        # dudy = dudy[:-1,:,:-1]*dudy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        # dudz = dudz[:-1,:-1,:]*dudz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
 
-        dvdx = dvdx[:,:-1,:-1]*dvdx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
-        dvdy = dvdy[:-1,:,:-1]*dvdy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
-        dvdz = dvdz[:-1,:-1,:]*dvdz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
+        # dvdx = dvdx[:,:-1,:-1]*dvdx[:,:-1,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        # dvdy = dvdy[:-1,:,:-1]*dvdy[:-1,:,:-1] # shape (Nx-1,Ny-1,Nz-1)
+        # dvdz = dvdz[:-1,:-1,:]*dvdz[:-1,:-1,:] # shape (Nx-1,Ny-1,Nz-1)
 
-        dudt = dudt[:-1,:-1,:-1]*dudt[:-1,:-1,:-1]
-        dvdt = dvdt[:-1,:-1,:-1]*dvdt[:-1,:-1,:-1]
+        # dudt = dudt[:-1,:-1,:-1]*dudt[:-1,:-1,:-1]
+        # dvdt = dvdt[:-1,:-1,:-1]*dvdt[:-1,:-1,:-1]
 
-        # add up
-        gradSq = dudx+dudy+dudz+dvdx+dvdy+dvdz # shape (Nx-1,Ny-1,Nz-1)
-        dotSq = dudt+dvdt
-        del dudx, dudy, dudz, dvdx, dvdy, dvdz, dudt, dvdt
-        gc.collect()
+        # # add up
+        # gradSq = dudx+dudy+dudz+dvdx+dvdy+dvdz # shape (Nx-1,Ny-1,Nz-1)
+        # dotSq = dudt+dvdt
+        # del dudx, dudy, dudz, dvdx, dvdy, dvdz, dudt, dvdt
+        # gc.collect()
 
-        # calculate energy density
-        energyDensity = 0.5*(dotSq + gradSq) + Vtot[:-1,:-1,:-1]
-        fig = plt.figure(figsize=(12,15))
-        ax = plt.axes()
-        xvv, yvv = np.meshgrid(x,y)
+        # # calculate energy density
+        # energyDensity = 0.5*(dotSq + gradSq) + Vtot[:-1,:-1,:-1]
+        # fig = plt.figure(figsize=(12,15))
+        # ax = plt.axes()
+        # xvv, yvv = np.meshgrid(x,y)
         
-        sm = ax.imshow(energyDensity[:,:,int(Nz/2)], cmap="gray", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
+        # sm = ax.imshow(energyDensity[:,:,int(Nz/2)], cmap="gray", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
         
-        plt.colorbar(sm, orientation="horizontal")
+        # plt.colorbar(sm, orientation="horizontal")
 
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-        title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
-        fig.suptitle(title)
+        # ax.set_xlabel("x")
+        # ax.set_ylabel("y")
+        # title = f'n = {n}, t = {round(ti+n*dt,3)}, $\\tau$ = {round(2*np.sqrt(ti+n*dt),3)}'
+        # fig.suptitle(title)
 
-        if save_plot:
-            filename = 'rho_tmp_%04d.png' % n
-            plt.savefig(filename)
-        ax.cla()
-        plt.close('all')
-        plt.draw()
-        time.sleep(1)
+        # if save_plot:
+        #     filename = 'rho_tmp_%04d.png' % n
+        #     plt.savefig(filename)
+        # ax.cla()
+        # plt.close('all')
+        # plt.draw()
+        # time.sleep(1)
 
         # 3D plot of strings
-        if n % 10 == 0:
-            idx = np.transpose(np.where(energyDensity>1.5*energyDensity.mean()))
+        if n % 5 == 0:
+            # energyDensity = energyDensity[10:-9,10:-9,10:-9]
+            # idx = np.transpose(np.where(energyDensity>energyDensity.mean()+(3*energyDensity.std())))
+            idx = np.transpose(np.where(np.sqrt(u**2+v**2)<0.4))
             print(idx.shape)
             c=np.sum((idx[:]-[int(Nz/2),int(Nz/2),int(Nz/2)])**2,axis=1)
+            
+            if c.size>0: # for coloring
+                c[0]=2*c.max()
 
             fig = plt.figure(figsize=(10,10))
             ax = fig.add_subplot(projection='3d')
 
             ax.scatter3D(idx[::,0],idx[::,1],idx[::,2],s=1,c=c,cmap="gray")
-            ax.set_xlim(0,256)
-            ax.set_ylim(0,256)
-            ax.set_zlim(0,256)
+            ax.set_xlim(0,Nx)
+            ax.set_ylim(0,Ny)
+            ax.set_zlim(0,Nz)
             ax.grid(False)
-            
-            # sm = ax.imshow(energyDensity[:,:,int(Nz/2)], cmap="pink", origin='lower', aspect = 'equal', extent=[xvv.min(), xvv.max(), yvv.min(), yvv.max()])
-            
-            # plt.colorbar(sm, orientation="horizontal")
 
             ax.set_xlabel("x")
             ax.set_ylabel("y")
@@ -545,7 +549,7 @@ def model(save_plot=True):
             fig.suptitle(title)
 
             if save_plot:
-                filename = 'str_tmp_%04d.png' % n
+                filename = 'str_tmp_%04d.png' % int(n/5)
                 plt.savefig(filename)
             ax.cla()
             plt.close('all')
